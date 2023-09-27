@@ -1,0 +1,85 @@
+AWSTemplateFormatVersion : '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: A sample SAM template for deploying Lambda functions.
+
+Globals:
+  Function:
+    Timeout: 150
+    MemorySize: 1024
+    Tracing: Active
+    AutoPublishAlias: live
+    Runtime: python3.9
+
+  Api:
+    EndpointConfiguration: REGIONAL
+    TracingEnabled: true
+    OpenApiVersion: '2.0'
+    Cors:
+      AllowMethods: "'OPTIONS,POST,GET,PUT'"
+      AllowHeaders: "'Content-Type,Authorization'"
+      AllowOrigin: "'*'"
+
+Resources:
+  UtilsLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      ContentUri: ./src/layers/
+      CompatibleRuntimes:
+          - python3.9
+
+  ProductsTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TableName: Products
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+
+  APIGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: api
+  
+  ProductServiceLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/product
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref UtilsLayer
+      Events:
+        ProductAPI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref APIGateway
+            Path: /product/{proxy+}
+            Method: any
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ProductsTable
+
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: LambdaExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
+        - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
+
+Outputs:
+  APIGateway:
+    Value: !Sub "https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com/${AWS::StackName}"
