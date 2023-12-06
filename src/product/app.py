@@ -9,6 +9,7 @@ dynamodb = boto3.client("dynamodb")
 
 app = APIGatewayRestResolver()
 
+
 @app.post("/product/create")
 def add_product():
     # Get the table name from the environment variable
@@ -44,7 +45,6 @@ def add_product():
     )
 
     return "Successfully Created"
-
 
 
 @app.get("/product/list")

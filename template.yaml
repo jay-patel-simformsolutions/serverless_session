@@ -51,6 +51,18 @@ Resources:
         - AttributeName: orderId
           KeyType: HASH
 
+  PaymentsTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TableName: Payments
+      AttributeDefinitions:
+        - AttributeName: paymentId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: paymentId
+          KeyType: HASH
+
   APIGateway:
     Type: AWS::Serverless::Api
     Properties:
@@ -74,6 +86,27 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref ProductsTable
+  
+  PaymentsServiceLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/payments
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref UtilsLayer
+      Events:
+        PaymentsAPI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref APIGateway
+            Path: /payment/{proxy+}
+            Method: any
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PaymentsTable
+          EVENT_BUS_NAME: !Ref PaymentsEventBus
+          EVENT_BUS_ENDPOINT: !Ref PaymentsTable
   
   NotificationServiceLambda:
     Type: AWS::Serverless::Function
@@ -149,6 +182,14 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: "*"
+        - PolicyName: AllowEventBridgeAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:*
+                Resource: "*"
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
         - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
@@ -157,6 +198,11 @@ Resources:
     Type: "AWS::SQS::Queue"
     Properties:
       QueueName: !Sub "${AWS::StackName}-notification-dead-letter-queue"
+
+  OrderDeadLetterQueue:
+    Type: "AWS::SQS::Queue"
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-orders-dead-letter-queue"
 
   NotificationQueue:
     Type: "AWS::SQS::Queue"
@@ -171,6 +217,47 @@ Resources:
             - "NotificationDeadLetterQueue"
             - "Arn"
         maxReceiveCount: 2
+
+  PaymentsEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub "${AWS::StackName}-payments-bus"
+
+  AllPaymentsEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventBusName: !Sub "${AWS::StackName}-payments-bus"
+      EventPattern:
+        detail-type:
+          - prefix: payment-
+      Name: !Sub "${AWS::StackName}-all-payments-events"
+      State: ENABLED
+      RoleArn:
+        Fn::GetAtt: 
+            - "LambdaExecutionRole"
+            - "Arn"
+      Targets:
+        - Id: !Sub "${AWS::StackName}-all-payments-notification-target"
+          Arn: 
+            Fn::GetAtt: 
+              - "NotificationServiceLambda"
+              - "Arn"
+          DeadLetterConfig:
+            Arn: 
+              Fn::GetAtt: 
+              - "NotificationDeadLetterQueue"
+              - "Arn"
+
+        - Id: !Sub "${AWS::StackName}-all-payments-order-target"
+          Arn: 
+            Fn::GetAtt: 
+              - "OrderServiceLambda"
+              - "Arn"
+          DeadLetterConfig:
+            Arn: 
+              Fn::GetAtt: 
+              - "OrderDeadLetterQueue"
+              - "Arn"
 
 Outputs:
   APIGateway:

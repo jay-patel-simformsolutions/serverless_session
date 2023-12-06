@@ -12,14 +12,15 @@ app = APIGatewayRestResolver()
 
 
 def push_message_on_notification_queue(message: dict):
-        """
-        To push a message in the Notification Queue
-        Params:
-            - message: message dict that is to be passed as the message body
-        """
-        sqs.send_message(
-            QueueUrl=os.environ["NOTIFICATION_QUEUE_URL"], MessageBody=json.dumps(message)
-        )
+    """
+    To push a message in the Notification Queue
+    Params:
+        - message: message dict that is to be passed as the message body
+    """
+    sqs.send_message(
+        QueueUrl=os.environ["NOTIFICATION_QUEUE_URL"], MessageBody=json.dumps(message)
+    )
+
 
 @app.post("/order/create")
 def add_orders():
@@ -59,12 +60,11 @@ def add_orders():
             "event": "order_created",
             "orderId": order_id,
             "orderAddress": order_address,
-            "productId": product_id
+            "productId": product_id,
         }
     )
 
     return "Successfully Created"
-
 
 
 @app.get("/order/list")
