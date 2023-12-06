@@ -38,6 +38,18 @@ Resources:
       KeySchema:
         - AttributeName: productId
           KeyType: HASH
+  
+  OrdersTable:
+    Type: 'AWS::DynamoDB::Table'
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      TableName: Orders
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
 
   APIGateway:
     Type: AWS::Serverless::Api
@@ -62,6 +74,46 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref ProductsTable
+  
+  NotificationServiceLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/notification
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref UtilsLayer
+      Events:
+        NotificationQueue:
+          Type: SQS
+          Properties:
+            Queue:
+              Fn::GetAtt: 
+                    - "NotificationQueue"
+                    - "Arn"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref ProductsTable
+
+  OrderServiceLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/order
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref UtilsLayer
+      Events:
+        OrderAPI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref APIGateway
+            Path: /order/{proxy+}
+            Method: any
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref OrdersTable
+          NOTIFICATION_QUEUE_URL: !Ref NotificationQueue
 
   LambdaExecutionRole:
     Type: 'AWS::IAM::Role'
@@ -76,10 +128,50 @@ Resources:
                 - lambda.amazonaws.com
             Action:
               - 'sts:AssumeRole'
+      Policies:
+        - PolicyName: AllowAllOperationsOnNotificationQueue
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sqs:*
+                Resource: 
+                  Fn::GetAtt: 
+                    - "NotificationQueue"
+                    - "Arn"
+        - PolicyName: AllowCloudWatchAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
       ManagedPolicyArns:
         - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
         - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
 
+  NotificationDeadLetterQueue:
+    Type: "AWS::SQS::Queue"
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-notification-dead-letter-queue"
+
+  NotificationQueue:
+    Type: "AWS::SQS::Queue"
+    DependsOn:
+      - NotificationDeadLetterQueue
+    Properties:
+      QueueName: !Sub "${AWS::StackName}-notification-queue"
+      VisibilityTimeout: 150
+      RedrivePolicy: 
+        deadLetterTargetArn: 
+          Fn::GetAtt: 
+            - "NotificationDeadLetterQueue"
+            - "Arn"
+        maxReceiveCount: 2
+
 Outputs:
   APIGateway:
-    Value: !Sub "https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com/${AWS::StackName}"
+    Value: !Sub "https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com/api"

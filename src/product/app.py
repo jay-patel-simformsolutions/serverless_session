@@ -46,6 +46,7 @@ def add_product():
     return "Successfully Created"
 
 
+
 @app.get("/product/list")
 def get_products():
     try:
