@@ -194,6 +194,22 @@ Resources:
         - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
         - 'arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess'
 
+  TargetRoleForEventRule:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: TargetRoleForEventRule
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AWSLambda_FullAccess'
+
   NotificationDeadLetterQueue:
     Type: "AWS::SQS::Queue"
     Properties:
@@ -234,7 +250,7 @@ Resources:
       State: ENABLED
       RoleArn:
         Fn::GetAtt: 
-            - "LambdaExecutionRole"
+            - "TargetRoleForEventRule"
             - "Arn"
       Targets:
         - Id: !Sub "${AWS::StackName}-all-payments-notification-target"
