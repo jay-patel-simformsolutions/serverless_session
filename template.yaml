@@ -20,6 +20,88 @@ Globals:
       AllowOrigin: "'*'"
 
 Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName:
+        !Join ["-", [!Ref AWS::StackName, "simform-serverless-session-pool"]]
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      MfaConfiguration: "OFF"
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          TemporaryPasswordValidityDays: 0
+
+      Schema:
+        - AttributeDataType: String
+          Name: email
+          Required: true
+        - AttributeDataType: String
+          Name: given_name
+          Mutable: true
+          Required: true
+        - AttributeDataType: String
+          Name: family_name
+          Mutable: true
+          Required: true
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      UserPoolId: !Ref UserPool
+      Domain:
+        !Join [
+          "-",
+          [!Ref AWS::StackName, "simform-serverless-session"],
+        ]
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:
+        !Join [
+          "-",
+          [!Ref AWS::StackName, "simform-serverless-session-client"],
+        ]
+      UserPoolId: !Ref UserPool
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - phone
+        - email
+        - openid
+      SupportedIdentityProviders:
+        - COGNITO
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_CUSTOM_AUTH
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      CallbackURLs:
+        - http://localhost/
+      LogoutURLs:
+        - http://localhost/
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 365
+      TokenValidityUnits:
+        AccessToken: "days"
+        IdToken: "days"
+        RefreshToken: "days"
+
   UtilsLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
@@ -63,11 +145,30 @@ Resources:
         - AttributeName: paymentId
           KeyType: HASH
 
+  AuthLambdaFucntion:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.9
+      Code: src/authorizers
+      Handler: auth.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+
   APIGateway:
     Type: AWS::Serverless::Api
     Properties:
       StageName: api
-  
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+          LambdaRequestAuthorizer:
+            FunctionPayloadType: REQUEST
+            FunctionArn: !GetAtt AuthLambdaFucntion.Arn
+            Identity:
+              Headers:
+                - Allow-me
+
   ProductServiceLambda:
     Type: AWS::Serverless::Function
     Properties:
@@ -76,7 +177,15 @@ Resources:
       Layers:
         - !Ref UtilsLayer
       Events:
-        ProductAPI:
+        GETProductAPI:
+          Type: Api
+          Properties:
+            RestApiId: !Ref APIGateway
+            Path: /product/{proxy+}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        ANYProductAPI:
           Type: Api
           Properties:
             RestApiId: !Ref APIGateway
@@ -101,6 +210,8 @@ Resources:
             RestApiId: !Ref APIGateway
             Path: /payment/{proxy+}
             Method: any
+            Auth:
+              Authorizer: LambdaRequestAuthorizer
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
